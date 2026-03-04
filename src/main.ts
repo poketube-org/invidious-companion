@@ -8,6 +8,18 @@ import type { HonoVariables } from "./lib/types/HonoVariables.ts";
 import { parseArgs } from "@std/cli/parse-args";
 import { existsSync } from "@std/fs/exists";
 
+ console.log("[INFO] Anti-Crash System: ACTIVE and LOADED");  
+
+globalThis.addEventListener("unhandledrejection", (e) => {
+    console.error("[Anti-Crash] Caught unhandled rejection:", e.reason);
+    e.preventDefault(); 
+});
+
+globalThis.addEventListener("error", (e) => {
+    console.error("[Anti-Crash] Caught uncaught exception:", e.error);
+    e.preventDefault();  
+});
+
 import { parseConfig } from "./lib/helpers/config.ts";
 const config = await parseConfig();
 import { Metrics } from "./lib/helpers/metrics.ts";
