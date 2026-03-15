@@ -13,6 +13,8 @@ function callWatchEndpoint(
     const watch_endpoint = new NavigationEndpoint({
         watchEndpoint: {
             videoId: videoId,
+            // Allow companion to gather sensitive content videos like
+            // `VuSU7PcEKpU`
             racyCheckOk: true,
             contentCheckOk: true,
         },
@@ -38,47 +40,6 @@ function callWatchEndpoint(
     );
 }
 
- 
-function isPlayerResponseValid(data: Record<string, any>): boolean {
-    // 1. Must have playabilityStatus and it must indicate success.
-    const playabilityStatus = data?.playabilityStatus?.status as
-        | string
-        | undefined;
-
-    const PLAYABLE_STATUSES = new Set(["OK", "CONTENT_CHECK_REQUIRED"]);
-
-    if (!playabilityStatus || !PLAYABLE_STATUSES.has(playabilityStatus)) {
-        console.log(
-            `[DEBUG] playabilityStatus = ${playabilityStatus ?? "(missing)"}`,
-        );
-        return false;
-    }
-
-    // 2. Must have streamingData.
-    if (!data?.streamingData) {
-        console.log("[DEBUG] streamingData is missing.");
-        return false;
-    }
-
-    // 3. adaptiveFormats must be a non-empty array.
-    const adaptiveFormats = data.streamingData.adaptiveFormats;
-    if (!Array.isArray(adaptiveFormats) || adaptiveFormats.length === 0) {
-        console.log("[DEBUG] adaptiveFormats is empty or missing.");
-        return false;
-    }
-
-    // 4. The first format must carry either a plain URL or a signatureCipher.
-    const firstFormat = adaptiveFormats[0];
-    if (!firstFormat.url && !firstFormat.signatureCipher) {
-        console.log(
-            "[DEBUG] First adaptiveFormat has neither url nor signatureCipher.",
-        );
-        return false;
-    }
-
-    return true;
-}
-
 export const youtubePlayerReq = async (
     innertubeClient: Innertube,
     videoId: string,
@@ -87,81 +48,58 @@ export const youtubePlayerReq = async (
 ): Promise<ApiResponse> => {
     const innertubeClientOauthEnabled = config.youtube_session.oauth_enabled;
 
-    // When OAuth is active the TV client has full entitlements (age-gated,
-    // made-for-kids, etc.).  Without OAuth we start with ANDROID_VR and fall
-    // back as needed.
-    const primaryClient = innertubeClientOauthEnabled ? "TV" : "ANDROID_VR";
+    let innertubeClientUsed = "ANDROID_VR";
+    if (innertubeClientOauthEnabled) {
+        innertubeClientUsed = "TV";
+    }
 
     const contentPoToken = await tokenMinter(videoId);
 
-    console.log(`[INFO] Trying primary YT client: ${primaryClient}`);
     const youtubePlayerResponse = await callWatchEndpoint(
         videoId,
         innertubeClient,
-        primaryClient,
+        innertubeClientUsed,
         contentPoToken,
     );
 
-    // Fast-path: primary client returned a fully usable response.
-    if (isPlayerResponseValid(youtubePlayerResponse.data)) {
-        return youtubePlayerResponse;
-    }
+    // Check if the first adaptive format URL is undefined, if it is then fallback to multiple YT clients
 
-    console.log(
-        `[WARNING] Primary client (${primaryClient}) returned an unusable ` +
-            `response for video "${videoId}". Falling back to other YT clients.`,
-    ); 
-    const fallbackClients = ["TV_SIMPLY", "WEB", "MWEB"];
+    if (
+        !innertubeClientOauthEnabled &&
+        youtubePlayerResponse.data.streamingData &&
+        youtubePlayerResponse.data.streamingData.adaptiveFormats[0].url ===
+            undefined
+    ) {
+        console.log(
+            "[WARNING] No URLs found for adaptive formats. Falling back to other YT clients.",
+        );
+        const innertubeClientsTypeFallback = [ "ANDROID_VR", "TV_SIMPLY", "MWEB"] ;
 
-    for (const clientType of fallbackClients) {
-        console.log(`[WARNING] Trying fallback YT client: ${clientType}`);
-
-        let fallbackResponse: ApiResponse;
-        try {
-            fallbackResponse = await callWatchEndpoint(
+        for await (const innertubeClientType of innertubeClientsTypeFallback) {
+            console.log(
+                `[WARNING] Trying fallback YT client ${innertubeClientType}`,
+            );
+            const youtubePlayerResponseFallback = await callWatchEndpoint(
                 videoId,
                 innertubeClient,
-                clientType,
+                innertubeClientType,
                 contentPoToken,
             );
-        } catch (err) {
-            console.log(
-                `[WARNING] Fallback client ${clientType} threw an error: ${err}`,
-            );
-            continue;
+            if (
+                youtubePlayerResponseFallback.data.streamingData && (
+                    youtubePlayerResponseFallback.data.streamingData
+                        .adaptiveFormats[0].url ||
+                    youtubePlayerResponseFallback.data.streamingData
+                        .adaptiveFormats[0].signatureCipher
+                )
+            ) {
+                youtubePlayerResponse.data.streamingData.adaptiveFormats =
+                    youtubePlayerResponseFallback.data.streamingData
+                        .adaptiveFormats;
+                break;
+            }
         }
-
-        if (!isPlayerResponseValid(fallbackResponse.data)) {
-            console.log(
-                `[WARNING] Fallback client ${clientType} also returned an ` +
-                    "unusable response. Continuing to next fallback.",
-            );
-            continue;
-        }
-
-        console.log(
-            `[INFO] Fallback client ${clientType} returned a valid response.`,
-        );
-
-        // Graft the working streamingData onto the original response so that
-        // all other metadata (videoDetails, microformat, etc.) from the first
-        // request is preserved for callers that rely on it.
-        youtubePlayerResponse.data.streamingData =
-            fallbackResponse.data.streamingData;
-
-        // Also propagate playabilityStatus so callers see "OK" rather than
-        // whatever error the primary client returned.
-        youtubePlayerResponse.data.playabilityStatus =
-            fallbackResponse.data.playabilityStatus;
-
-        return youtubePlayerResponse;
     }
 
-    // All clients failed — return the original response as-is and let the
-    // caller decide how to handle the error (it can inspect playabilityStatus).
-    console.log(
-        `[ERROR] All YT clients failed for video "${videoId}". ` +
-            "Returning primary response with original error details.",
-    );
     return youtubePlayerResponse;
 };
