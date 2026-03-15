@@ -48,7 +48,7 @@ export const youtubePlayerReq = async (
 ): Promise<ApiResponse> => {
     const innertubeClientOauthEnabled = config.youtube_session.oauth_enabled;
 
-    let innertubeClientUsed = "WEB";
+    let innertubeClientUsed = "ANDROID_VR";
     if (innertubeClientOauthEnabled) {
         innertubeClientUsed = "TV";
     }
@@ -73,7 +73,7 @@ export const youtubePlayerReq = async (
         console.log(
             "[WARNING] No URLs found for adaptive formats. Falling back to other YT clients.",
         );
-        const innertubeClientsTypeFallback = [ "TV_SIMPLY", "MWEB", "ANDROID_VR"];
+        const innertubeClientsTypeFallback = [ "ANDROID_VR", "TV_SIMPLY", "MWEB";
 
         for await (const innertubeClientType of innertubeClientsTypeFallback) {
             console.log(
