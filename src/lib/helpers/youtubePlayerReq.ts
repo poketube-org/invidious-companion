@@ -48,7 +48,7 @@ export const youtubePlayerReq = async (
 ): Promise<ApiResponse> => {
     const innertubeClientOauthEnabled = config.youtube_session.oauth_enabled;
 
-    let innertubeClientUsed = "ANDROID_VR";
+    let innertubeClientUsed = "WEB";
     if (innertubeClientOauthEnabled) {
         innertubeClientUsed = "TV";
     }
